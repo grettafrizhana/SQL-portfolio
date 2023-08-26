@@ -1,0 +1,11 @@
+select ld.supplier_id, supplier_name, count(loan_id) as total_loans, sum(amount_to_finance) as total_disbursed, npl_amount, npl_amount/sum(amount_to_finance) as npl_percentage
+from mysql_rep.at_metric_db.loan_details ld
+left join (select supplier_id, sum(amount_to_finance) as npl_amount
+            from mysql_rep.at_metric_db.loan_details 
+            where dpd > 90 and dpd <= 120 and product_type like 'SF%' or product_type like 'AwanTempo%'
+            group by supplier_id
+            )a on ld.supplier_id = a.supplier_id
+where (product_type like 'SF%' or product_type like 'AwanTempo%') and supplier_region != 'Partnership'
+group by ld.supplier_id, supplier_name, npl_amount
+order by total_disbursed desc
+limit 10
