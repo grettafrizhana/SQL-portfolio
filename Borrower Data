@@ -1,0 +1,30 @@
+select distinct kyc.full_name, kyc.gender, kyc.dob, kyc.marriage_status, residence_city, residence_post_code, residence_province, 
+pef.pefindo_score, ld.product_type, total_principal, total_interest, ld.annual_interest, la.loan_doc_number,ld.id_number, kyc.residence_address, kyc.business_name, kyc.business_address,last_payment_date, repayment_amount_paid, outstanding_balance
+from mysql_rep.at_metric_db.loan_applications la
+left join (select distinct  id_number, sum(amount_to_finance) as total_principal, sum(interest_fee) as total_interest, product_type, loan_application_id, interest_rate*12 as annual_interest, loan_owner
+           from mysql_rep.at_metric_db.loan_details
+           where disburse_date <= date('2023-06-30')
+           group by loan_id, id_number,product_type, loan_application_id, interest_rate*12, loan_owner, disburse_date) ld on ld.loan_application_id = la.loan_application_id
+left join mysql_rep.at_metric_db.loc_applications loc on la.loc_application_id = loc.loc_application_id
+left join mysql_rep.at_metric_db.kyc_details kyc on kyc.kyc_id = loc.kyc_id
+left join mysql_rep.at_metric_db.loc_pefindo pef on pef.loc_application_id = loc.loc_application_id
+left join (select distinct ld.id_number, last_payment_date, repayment_amount_paid, b.outstanding_balance
+            from mysql_rep.at_metric_db.repayment_schedules rs
+            left join mysql_rep.at_metric_db.loan_details ld on ld.loan_id = rs.loan_id
+            -- get the latest payment date
+            join (select distinct id_number, max(repayment_date_paid) as last_payment_date
+                  from mysql_rep.at_metric_db.repayment_schedules rs
+                  left join mysql_rep.at_metric_db.loan_details ld on rs.loan_id = ld.loan_id
+                  where loan_owner = 'Credit Saison'
+                  group by id_number)a on a.id_number = ld.id_number and rs.repayment_date_paid = a.last_payment_date 
+              -- join with id_number and last_payment_date so we can get the latest payment of each id number
+            left join (select id_number, sum(outstanding) as outstanding_balance -- get total outstanding of each id_number
+                        from (select id_number,case when amount_expected_date_paid is not null then 0
+                                                else repayment_amount_expected - repayment_amount_paid end as outstanding
+                                                from mysql_rep.at_metric_db.repayment_schedules rs
+                                                left join mysql_rep.at_metric_db.loan_details ld on ld.loan_id = rs.loan_id
+                                                where loan_owner = 'Credit Saison')
+                                group by id_number
+                        )b on b.id_number = ld.id_number
+            where loan_owner = 'Credit Saison'
+            )rs on rs.id_number = ld.id_number
