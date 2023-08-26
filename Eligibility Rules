@@ -1,0 +1,82 @@
+-- BILLING_CYCLE GANTI JD ARS.MYTH
+with eligible_data as(
+
+with data as (
+
+with ec_37 as(select distinct ld.id_number, 
+case when product_type like '%AwanTempo%' then 'AwanTempo' else '' end as AwanTempo,
+case when product_type = 'SF Regular' then 'SFR' else '' end as SFR,
+case when product_type = 'SF Jumbo' then 'SFJ' else '' end as SFJ
+from mysql_rep.presto_result_db.accial_loan ac
+left join mysql_rep.at_metric_db.loan_details ld on ac.externalloanid = ld.loan_id)
+
+select distinct ac.externalloanid, ac.totaldisbursementamount, ars.dpd,   ld.loan_owner, ld.customer_id, ld.product_type ,--  'AW-EC02' as Rule,
+ld.loan_status, ac.disbursementdate, ars.myth as billing_cycle, 
+rs.repayment_date_expected, ac.interestrate, ars.xirr,ars.interest_rate_per_anum, ld.interest_fee,
+total_amount_paid, ars.outstanding_principal, 
+(ac.totaldisbursementamount + ld.interest_fee - total_amount_paid) as ineligible_amount, 
+rs.total_discount, 
+rs.total_waive_fee, rs.total_late_fee, ld.restructure_from, 
+case when rs.total_discount > 0 and ld.loan_owner not in ('ATI OCBC') then 'AW_EC02' else '' end as "AW_EC02",
+case when ld.restructure_from != '' and rs.repayment_amount_paid = 0 then 'AW_EC08' else '' end as "AW_EC08",
+case when ld.loan_owner in ('ATI OCBC','ATI CS','ATI JT') then 'AW_EC09' else '' end as "AW_EC09",
+case when ld.product_type in ('AwanTempo Loyal', 'Micro Tempo') and ac.totaldisbursementamount > 550000000 then 'AW_EC13' else '' end as "AW_EC13",
+case when ld.product_type in ('AwanTempo Loyal', 'Micro Tempo') and ars.myth > 35 then 'AW_EC14' else '' end as "AW_EC14",
+case when ld.product_type = 'AwanTempo Loyal' and ars.xirr < 0.18 then 'AW_EC15'  
+     when ld.product_type =  'Micro Tempo' and disbursementdate <= date('2022-04-22') and ld.interest_rate <0.18 then 'AW_EC15' else '' end as "AW_EC15",
+case when ld.product_type = 'AwanTempo Non-Loyal' and ac.totaldisbursementamount = 220000000 then 'AW_EC17' else '' end as "AW_EC17",
+case when ld.product_type = 'AwanTempo Non-Loyal' and ars.myth > 35 then 'AW_EC18' else '' end as "AW_EC18",
+case when ld.product_type = 'AwanTempo Non-Loyal' and ars.xirr < 0.18  then 'AW_EC19' else '' end as "AW_EC19",
+case when externalloanid in ('LATNL33822','LATNL35130','LATNL35139','LATNL35145','LATNL35147','LATNL35152','LATNL35171','LATNL35173','LATNL35190','LATNL35205','LATNL35139') then 'AW_EC20' else '' end as "AW_EC20",
+case when ld.product_type = 'SF Regular' and ac.totaldisbursementamount > 2000000000 then 'AW_EC21' else '' end as "AW_EC21",
+case when ld.product_type = 'SF Regular' and ars.myth > 90 then 'AW_EC22' else '' end as "AW_EC22",
+case when ld.product_type = 'SF Regular' and ars.xirr <0.18 then 'AW_EC23' else '' end as "AW_EC23",
+case when ld.product_type = 'SF Jumbo' and ac.totaldisbursementamount > 20000000000 then 'AW_EC25' else '' end as "AW_EC25",
+case when ld.product_type = 'SF Jumbo' and ars.myth > 35 then 'AW_EC26' else '' end as "AW_EC26",
+case when ld.product_type = 'SF Jumbo' and ars.xirr <0.18 then 'AW_EC27' else '' end as "AW_EC27",
+case when SFR != '' and SFJ != '' or externalloanid like 'LTF%' then 'AW_EC37' else '' end as "AW_EC37"
+
+from mysql_rep.presto_result_db.accial_loan ac
+join (select a.loan_id, dpd, xirr, interest_rate_per_anum, outstanding_principal, repayment_date_expected,id_number, myth
+        from mysql_rep.at_metric_db.xc_accial_rules a
+        inner join (select loan_id, max(repayment_date_expected) as expected_date
+                    from mysql_rep.at_metric_db.xc_accial_rules 
+                    group by loan_id) b on a.loan_id = b.loan_id and a.repayment_date_expected = b.expected_date) 
+    ars on ac.externalloanid = ars.loan_id
+left join mysql_rep.at_metric_db.loan_details ld on ac.externalloanid = ld.loan_id
+left join (select c.loan_id, repayment_date_expected, total_amount_paid, repayment_amount_paid, 
+            total_amount_expected, total_discount, total_waive_fee, total_late_fee, installment_number
+            from mysql_rep.at_metric_db.repayment_schedules c
+            inner join (select loan_id, max(repayment_date_expected) as expected_date, sum(repayment_amount_paid) as total_amount_paid,sum(repayment_amount_expected) as total_amount_expected,
+                sum(discount) as total_discount, sum(waive_fee) as total_waive_fee, sum(late_fee) as total_late_fee
+            from mysql_rep.at_metric_db.repayment_schedules 
+            group by loan_id) d on c.loan_id = d.loan_id and c.repayment_date_expected = d.expected_date) rs 
+        on rs.loan_id = ac.externalloanid
+left join ec_37 on ec_37.id_number = ars.id_number
+where ac.lender in ('PT AwanTunai Indonesia', 'Accial Capital')
+)
+
+select *, 
+case when AW_EC02  != '' then 'AW-EC-02'
+     when AW_EC08  != '' then 'AW-EC-08' 
+     when AW_EC09  != '' then 'AW-EC-09'
+     when AW_EC13  != '' then 'AW-EC-13'
+     when AW_EC14  != '' then 'AW-EC-14'
+     when AW_EC15  != '' then 'AW-EC-15'
+     when AW_EC17  != '' then 'AW-EC-17'
+     when AW_EC18  != '' then 'AW-EC-18'
+     when AW_EC19  != '' then 'AW-EC-19'
+     when AW_EC20  != '' then 'AW-EC-20'
+     when AW_EC21  != '' then 'AW-EC-21'
+     when AW_EC22  != '' then 'AW-EC-22'
+     when AW_EC23  != '' then 'AW-EC-23'
+     when AW_EC25  != '' then 'AW-EC-25'
+     when AW_EC26  != '' then 'AW-EC-26'
+     when AW_EC27  != '' then 'AW-EC-27'
+     when AW_EC37  != '' then 'AW-EC-37'
+     else '' end as ineligible
+from data)
+
+select *
+from eligible_data
+where  ineligible != ''
